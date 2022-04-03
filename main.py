@@ -11,27 +11,26 @@ from time import sleep
 app = Flask(__name__)
   
 # on the terminal type: curl http://localhost:808x/
-# returns the success when we send valid update counter message
+# returns the success when we send valid update vector_clock message
 # example body:
 #   body = {
-#       "counter": [1, 1, 3]
+#       "vector_clock": [1, 1, 3]
 #   }
 @app.route('/', methods = ['POST'])
 def home():
-    if(request.method == 'POST'):
-        receive_message(request.json)
-        return jsonify({'result': 'success'})
+    receive_message(request.json)
+    return jsonify({'result': 'success'})
 
 # method that handles incoming message 
 def receive_message(request):
     lock.acquire()
     try:
-        print(f"[{name}] counter before receiving: {counter}" )
-        counter[server_number] += 1
-        for x in range(len(counter)):
-            if request["counter"][x] > counter[x]:
-                counter[x] = request["counter"][x]
-        print(f"[{name}] counter after receiving: {counter}")
+        print(f"[{name}] vector_clock before receiving: {vector_clock}" )
+        for x in range(len(vector_clock)):
+            if request["vector_clock"][x] > vector_clock[x]:
+                vector_clock[x] = request["vector_clock"][x]
+        vector_clock[server_number] += 1
+        print(f"[{name}] vector_clock after receiving: {vector_clock}")
     finally:
         lock.release()
 
@@ -41,16 +40,17 @@ def send_message(server_port):
     try:
         try:
             if (server_port != port):
-                print(f"[{name}] counter before send: {counter}")
                 url = 'http://localhost:' + str(server_port)
                 body = {
-                    "counter": counter
+                    "vector_clock": vector_clock
                 }
-                post(url, json=body)
-                counter[server_number] += 1
-                print(f"[{name}] counter after send: {counter}")
-        except:
-            pass
+                post(url, json=body, timeout=20)
+                print(f"[{name}] vector_clock before send: {vector_clock}")
+                vector_clock[server_number] += 1
+                print(f"[{name}] vector_clock after send: {vector_clock}")
+        except Exception as e:
+            # pass
+            print(f"[{name}] send failed: {vector_clock}")
     finally:
         lock.release()
 
@@ -58,42 +58,52 @@ def send_message(server_port):
 def do_event():
     lock.acquire()
     try:
-        print(f"[{name}] counter before event: {counter}")
-        sleep(randint(1,10))
-        counter[server_number] += 1
-        print(f"[{name}] counter after event: {counter}")
+        print(f"[{name}] vector_clock before event: {vector_clock}")
+        sleep(1)
+        vector_clock[server_number] += 1
+        print(f"[{name}] vector_clock after event: {vector_clock}")
     finally:
         lock.release()
-
+# generate name and port from server_number input argument 
 def generate_name_port():
     port = 8080 + server_number
     name = "server_" + str(port)
     return name, port
 
+# run event on a random interval
 def run_events_interval():
-    Timer(randint(1,60), run_events_interval).start()
+    Timer(randint(0,5), run_events_interval).start()
     do_event()
 
+# run send on a random interval
 def run_sends_randomly():
-    Timer(randint(1,60), run_sends_randomly).start()
+    Timer(randint(0,30), run_sends_randomly).start()
     send_message(8080 + randint(0,2))
 
+# main method
 if __name__ == '__main__':
+    # check we have argument
     if len(argv) == 2:
+        # create global vars for lock, server name, port, server number and vector clock ()
         global lock
         global name
         global port
         global server_number
-        global counter
+        global vector_clock
+        # assign global vars
         lock = Lock()
         server_number = int(argv[1])
         name, port = generate_name_port()
-        counter = [0, 0, 0]
+        vector_clock = [0, 0, 0]
+        # mute flask logger
         log = getLogger('werkzeug')
         log.setLevel(ERROR)
+        # start receiving incoming vector clocks
         Thread(target=lambda: app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)).start()
-        sleep(1)
-        run_events_interval()
+        # sleep to avoid mixing with flask start up logs
+        sleep(2)
+        # start event and send threads
+        # run_events_interval()
         run_sends_randomly()
     else: 
         print("bad arguments, check readme")
